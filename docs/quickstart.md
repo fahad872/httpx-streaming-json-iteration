@@ -387,7 +387,8 @@ with httpx.stream("GET", "https://example.org/events") as response:
 line. `application/json-seq` yields records separated by the record separator
 character (`\x1e`), allowing formatted JSON within each record. The final record
 is yielded when the stream ends. `application/json` and `application/*+json`
-yield one complete document, including arrays, after reading the body.
+yield top-level array items individually as they arrive; nested arrays remain
+intact. Other JSON documents yield one value after reading the body.
 Other or missing content types raise `ValueError`; malformed records raise
 `json.JSONDecodeError`. Decoding uses the response's text encoding, including
 the `charset` parameter, and handles compressed responses. JSON decoder keyword

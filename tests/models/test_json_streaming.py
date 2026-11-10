@@ -12,7 +12,21 @@ import httpx
 @pytest.mark.parametrize(
     "content_type, body, expected",
     [
-        ("application/json", '[1, {"name": "café"}]', [[1, {"name": "café"}]]),
+        ("application/json", '[1, {"name": "café"}]', [1, {"name": "café"}]),
+        ("application/json", " [] \r\n", []),
+        ("application/vnd.test+json", "[[], [1, 2], {}, null]", [[], [1, 2], {}, None]),
+        (
+            "application/json",
+            "[1.25e+2, -123, true, false]",
+            [125.0, -123, True, False],
+        ),
+        (
+            "application/json",
+            '["a,b]", "escaped\\"", "slash\\\\"]',
+            ["a,b]", 'escaped"', "slash\\"],
+        ),
+        ("application/json", "123", [123]),
+        ("application/x-ndjson", "\r\n \t\n[1, 2]\n\n{}\n", [[1, 2], {}]),
         ("Application/Problem+JSON; charset=utf-8", '{"a": 1}', [{"a": 1}]),
         ("application/x-ndjson", '\n{"a": 1}\r\nnull\n42', [{"a": 1}, None, 42]),
         ("application/ndjson", '"café"\nfalse\n', ["café", False]),
@@ -44,10 +58,17 @@ async def test_json_formats(content_type, body, expected):
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("encoding", ["utf-16", "iso-8859-1"])
-async def test_json_encoding_and_compression(encoding):
-    body = gzip.compress('"café"\n1.25\n'.encode(encoding))
+@pytest.mark.parametrize(
+    "media_type, document",
+    [
+        ("application/x-ndjson", '"café"\n1.25\n'),
+        ("application/json", '["café", 1.25]'),
+    ],
+)
+async def test_json_encoding_and_compression(encoding, media_type, document):
+    body = gzip.compress(document.encode(encoding))
     headers = {
-        "content-type": f"application/x-ndjson; charset={encoding}",
+        "content-type": f"{media_type}; charset={encoding}",
         "content-encoding": "gzip",
     }
     chunks = [body[index : index + 1] for index in range(len(body))]
@@ -71,6 +92,21 @@ async def test_json_encoding_and_compression(encoding):
     [
         ("application/json", b""),
         ("application/json", b"{} trailing"),
+        *[
+            ("application/json", body)
+            for body in [
+                b"[",
+                b"[1",
+                b"[1,]",
+                b"[,1]",
+                b"[1,,2]",
+                b"[1 2]",
+                b"[] trailing",
+                b"[{}",
+                b'["unterminated]',
+                b"[1e,2]",
+            ]
+        ],
         ("application/x-ndjson", b"{}\n{broken}\n"),
         ("application/json-seq", b"{}\x1e{}"),
         ("application/json-seq", b"\x1e{broken}"),
@@ -96,16 +132,23 @@ async def test_json_unsupported_type(content_type):
         [value async for value in response.aiter_json()]
 
 
-def test_json_yields_before_end_of_stream():
+@pytest.mark.parametrize(
+    "content_type, first, rest",
+    [
+        ("application/x-ndjson", b'{"a": 1}\n', b"null\n"),
+        ("application/json", b'[{"a": 1},', b"null]"),
+    ],
+)
+def test_json_yields_before_end_of_stream(content_type, first, rest):
     received = False
 
     def body() -> typing.Iterator[bytes]:
-        yield b'{"a": 1}\n'
+        yield first
         assert received, "The first record must arrive before reading further"
-        yield b"null\n"
+        yield rest
 
     response = httpx.Response(
-        200, headers={"content-type": "application/x-ndjson"}, content=body()
+        200, headers={"content-type": content_type}, content=body()
     )
     iterator = response.iter_json()
     assert next(iterator) == {"a": 1}
@@ -114,16 +157,23 @@ def test_json_yields_before_end_of_stream():
 
 
 @pytest.mark.anyio
-async def test_json_yields_before_end_of_async_stream():
+@pytest.mark.parametrize(
+    "content_type, first, rest",
+    [
+        ("application/x-ndjson", b'{"a": 1}\n', b"null\n"),
+        ("application/json", b'[{"a": 1},', b"null]"),
+    ],
+)
+async def test_json_yields_before_end_of_async_stream(content_type, first, rest):
     received = False
 
     async def body() -> typing.AsyncIterator[bytes]:
-        yield b'{"a": 1}\n'
+        yield first
         assert received, "The first record must arrive before reading further"
-        yield b"null\n"
+        yield rest
 
     response = httpx.Response(
-        200, headers={"content-type": "application/x-ndjson"}, content=body()
+        200, headers={"content-type": content_type}, content=body()
     )
     iterator = response.aiter_json()
     assert await iterator.__anext__() == {"a": 1}

@@ -836,8 +836,8 @@ class Response:
         """
         Yield JSON values using the response Content-Type and text encoding.
 
-        JSON and application/*+json yield one complete document. NDJSON and
-        JSON sequences yield individual records as they become available.
+        JSON and application/*+json yield top-level array items, or one value
+        for other documents. NDJSON and JSON sequences yield individual records.
         Keyword arguments are passed to json.loads().
         """
         decoder = JSONIterator(self.headers.get("content-type", ""), **kwargs)
