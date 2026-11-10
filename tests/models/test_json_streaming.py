@@ -110,6 +110,12 @@ async def test_json_encoding_and_compression(encoding, media_type, document):
         ("application/x-ndjson", b"{}\n{broken}\n"),
         ("application/json-seq", b"{}\x1e{}"),
         ("application/json-seq", b"\x1e{broken}"),
+        ("application/json-seq", b"\x1e"),
+        ("application/json-seq", b"\x1e \r\n\t"),
+        ("application/json-seq", b"\x1e{}\n\x1e"),
+        ("application/json-seq", b"\x1e{}\n\x1e \n"),
+        ("application/json-seq", b" \x1e{}"),
+        ("application/json-seq", b"\n"),
     ],
 )
 async def test_json_invalid(content_type, body):

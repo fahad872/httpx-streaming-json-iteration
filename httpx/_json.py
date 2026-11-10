@@ -37,7 +37,7 @@ class JSONIterator:
         while self.separator in self.buffer:
             record, self.buffer = self.buffer.split(self.separator, 1)
             if self.separator == "\x1e" and not self.started:
-                if record.strip():
+                if record:
                     raise json.JSONDecodeError("Expected record separator", record, 0)
                 self.started = True
                 continue
@@ -111,7 +111,12 @@ class JSONIterator:
             yield json.loads(record, **self.kwargs)
             return
         record, self.buffer = self.buffer, ""
-        if self.separator == "\x1e" and not self.started and record.strip():
-            raise json.JSONDecodeError("Expected record separator", record, 0)
-        if not self.separator or record.strip():
+        if self.separator == "\x1e":
+            if not self.started:
+                if record:
+                    raise json.JSONDecodeError("Expected record separator", record, 0)
+                return
+            # An RS starts a record even when no JSON follows it before EOF.
+            yield json.loads(record, **self.kwargs)
+        elif record.strip():
             yield json.loads(record, **self.kwargs)

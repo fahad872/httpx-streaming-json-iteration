@@ -384,9 +384,10 @@ with httpx.stream("GET", "https://example.org/events") as response:
 ```
 
 `application/x-ndjson` and `application/ndjson` yield one value per non-empty
-line. `application/json-seq` yields records separated by the record separator
+line. Every `application/json-seq` record starts with the record separator
 character (`\x1e`), allowing formatted JSON within each record. The final record
-is yielded when the stream ends. `application/json` and `application/*+json`
+is yielded when the stream ends; an empty or whitespace-only final record raises
+`json.JSONDecodeError`. `application/json` and `application/*+json`
 yield top-level array items individually as they arrive; nested arrays remain
 intact. Other JSON documents yield one value after reading the body.
 Other or missing content types raise `ValueError`; malformed records raise
