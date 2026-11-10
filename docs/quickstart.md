@@ -375,6 +375,25 @@ not be automatically decoded.
 ...         print(chunk)
 ```
 
+JSON streams can be decoded according to the response's `Content-Type`:
+
+```python
+with httpx.stream("GET", "https://example.org/events") as response:
+    for value in response.iter_json():
+        print(value)
+```
+
+`application/x-ndjson` and `application/ndjson` yield one value per non-empty
+line. `application/json-seq` yields records separated by the record separator
+character (`\x1e`), allowing formatted JSON within each record. The final record
+is yielded when the stream ends. `application/json` and `application/*+json`
+yield one complete document, including arrays, after reading the body.
+Other or missing content types raise `ValueError`; malformed records raise
+`json.JSONDecodeError`. Decoding uses the response's text encoding, including
+the `charset` parameter, and handles compressed responses. JSON decoder keyword
+arguments such as `parse_float` and `object_hook` are supported. Use
+`async for value in response.aiter_json()` with an async client.
+
 If you're using streaming responses in any of these ways then the `response.content` and `response.text` attributes will not be available, and will raise errors if accessed. However you can also use the response streaming functionality to conditionally load the response body:
 
 ```pycon

@@ -30,6 +30,7 @@ from ._exceptions import (
     StreamConsumed,
     request_context,
 )
+from ._json import JSONIterator
 from ._multipart import get_multipart_boundary_from_content_type
 from ._status_codes import codes
 from ._types import (
@@ -831,6 +832,34 @@ class Response:
     def json(self, **kwargs: typing.Any) -> typing.Any:
         return jsonlib.loads(self.content, **kwargs)
 
+    def iter_json(self, **kwargs: typing.Any) -> typing.Iterator[typing.Any]:
+        """
+        Yield JSON values using the response Content-Type and text encoding.
+
+        JSON and application/*+json yield one complete document. NDJSON and
+        JSON sequences yield individual records as they become available.
+        Keyword arguments are passed to json.loads().
+        """
+        decoder = JSONIterator(self.headers.get("content-type", ""), **kwargs)
+        for text in self.iter_text():
+            yield from decoder.decode(text)
+        yield from decoder.flush()
+
+    async def aiter_json(
+        self, **kwargs: typing.Any
+    ) -> typing.AsyncIterator[typing.Any]:
+        """An async version of iter_json()."""
+        decoder = JSONIterator(self.headers.get("content-type", ""), **kwargs)
+        text_iterator = self.aiter_text()
+        try:
+            async for text in text_iterator:
+                for value in decoder.decode(text):
+                    yield value
+        finally:
+            await text_iterator.aclose()
+        for value in decoder.flush():
+            yield value
+
     @property
     def cookies(self) -> Cookies:
         if not hasattr(self, "_cookies"):
@@ -981,7 +1010,7 @@ class Response:
 
     async def aiter_bytes(
         self, chunk_size: int | None = None
-    ) -> typing.AsyncIterator[bytes]:
+    ) -> typing.AsyncGenerator[bytes, None]:
         """
         A byte-iterator over the decoded response content.
         This allows us to handle gzip, deflate, brotli, and zstd encoded responses.
@@ -994,10 +1023,14 @@ class Response:
             decoder = self._get_content_decoder()
             chunker = ByteChunker(chunk_size=chunk_size)
             with request_context(request=self._request):
-                async for raw_bytes in self.aiter_raw():
-                    decoded = decoder.decode(raw_bytes)
-                    for chunk in chunker.decode(decoded):
-                        yield chunk
+                raw_iterator = self.aiter_raw()
+                try:
+                    async for raw_bytes in raw_iterator:
+                        decoded = decoder.decode(raw_bytes)
+                        for chunk in chunker.decode(decoded):
+                            yield chunk
+                finally:
+                    await raw_iterator.aclose()
                 decoded = decoder.flush()
                 for chunk in chunker.decode(decoded):
                     yield chunk  # pragma: no cover
@@ -1006,7 +1039,7 @@ class Response:
 
     async def aiter_text(
         self, chunk_size: int | None = None
-    ) -> typing.AsyncIterator[str]:
+    ) -> typing.AsyncGenerator[str, None]:
         """
         A str-iterator over the decoded response content
         that handles both gzip, deflate, etc but also detects the content's
@@ -1015,10 +1048,14 @@ class Response:
         decoder = TextDecoder(encoding=self.encoding or "utf-8")
         chunker = TextChunker(chunk_size=chunk_size)
         with request_context(request=self._request):
-            async for byte_content in self.aiter_bytes():
-                text_content = decoder.decode(byte_content)
-                for chunk in chunker.decode(text_content):
-                    yield chunk
+            byte_iterator = self.aiter_bytes()
+            try:
+                async for byte_content in byte_iterator:
+                    text_content = decoder.decode(byte_content)
+                    for chunk in chunker.decode(text_content):
+                        yield chunk
+            finally:
+                await byte_iterator.aclose()
             text_content = decoder.flush()
             for chunk in chunker.decode(text_content):
                 yield chunk  # pragma: no cover
@@ -1036,7 +1073,7 @@ class Response:
 
     async def aiter_raw(
         self, chunk_size: int | None = None
-    ) -> typing.AsyncIterator[bytes]:
+    ) -> typing.AsyncGenerator[bytes, None]:
         """
         A byte-iterator over the raw response content.
         """
