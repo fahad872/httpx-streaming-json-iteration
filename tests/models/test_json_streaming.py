@@ -7,6 +7,75 @@ import pytest
 
 import httpx
 
+STREAMING_DOCUMENTS = [
+    ("application/json", b"[1,2]"),
+    ("application/problem+json", b"[1,2]"),
+    ("application/x-ndjson", b"1\n2\n"),
+    ("application/ndjson", b"1\n2\n"),
+    ("application/json-seq", b"\x1e1\n\x1e2\n"),
+]
+
+
+@pytest.mark.parametrize("content_type, body", STREAMING_DOCUMENTS)
+@pytest.mark.parametrize("partial", [False, True])
+def test_json_stream_consumed(content_type, body, partial):
+    response = httpx.Response(
+        200, headers={"content-type": content_type}, content=iter([body])
+    )
+    iterator = response.iter_json()
+    if partial:
+        assert next(iterator) == 1
+    else:
+        assert list(iterator) == [1, 2]
+        assert response.is_closed
+    assert response.is_stream_consumed
+    with pytest.raises(httpx.StreamConsumed):
+        list(response.iter_json())
+    with pytest.raises(httpx.StreamConsumed):
+        list(response.iter_bytes())
+    with pytest.raises(httpx.ResponseNotRead):
+        _ = response.content
+    if partial:
+        assert list(iterator) == [2]
+    response.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("content_type, body", STREAMING_DOCUMENTS)
+@pytest.mark.parametrize("partial", [False, True])
+async def test_json_async_stream_consumed(content_type, body, partial):
+    async def async_body() -> typing.AsyncIterator[bytes]:
+        yield body
+
+    response = httpx.Response(
+        200, headers={"content-type": content_type}, content=async_body()
+    )
+    iterator = response.aiter_json()
+    if partial:
+        assert await iterator.__anext__() == 1
+    else:
+        assert [value async for value in iterator] == [1, 2]
+        assert response.is_closed
+    assert response.is_stream_consumed
+    with pytest.raises(httpx.StreamConsumed):
+        [value async for value in response.aiter_json()]
+    with pytest.raises(httpx.StreamConsumed):
+        [chunk async for chunk in response.aiter_bytes()]
+    with pytest.raises(httpx.ResponseNotRead):
+        _ = response.content
+    if partial:
+        assert [value async for value in iterator] == [2]
+    await response.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("content_type, body", STREAMING_DOCUMENTS)
+async def test_json_buffered_response_can_be_repeated(content_type, body):
+    response = httpx.Response(200, headers={"content-type": content_type}, content=body)
+    for _ in range(2):
+        assert list(response.iter_json()) == [1, 2]
+        assert [value async for value in response.aiter_json()] == [1, 2]
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
